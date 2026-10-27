@@ -113,13 +113,13 @@ Enfin, `@torch.no_grad()` désactive le calcul des gradients, mais ne remplace p
 
 Avec 1 000 classes, un modèle qui prédit totalement au hasard a une **accuracy théorique de 0,1 %** et une **CrossEntropyLoss d’environ 6,9078** :
 
-\[
-Accuracy = \frac{1}{1000}=0{,}1\%
-\]
+$$
+\text{Accuracy} = \frac{1}{1000} = 0{,}1\%
+$$
 
-\[
-Loss = \ln(1000)\approx6{,}9078
-\]
+$$
+\text{Loss} = \ln(1000) \approx 6{,}9078
+$$
 
 **À la première époque :**
 
@@ -174,28 +174,17 @@ AlexNetDeep ajoute **3 couches convolutives**, soit **1 770 240 paramètres supp
 
 **Explication :** les couches supplémentaires rendent l'entraînement plus difficile et peuvent perturber la propagation des gradients, sans que cela soit directement prouvé par les courbes.
 
-**Conclusion :** ajouter des couches ne garantit pas de meilleurs résultats. Dans notre expérience, **AlexNet standard reste le plus performant**.
+**Conclusion :
+ajouter des couches ne garantit pas de meilleurs résultats. Dans notre expérience, AlexNet standard reste le plus performant.
 ---
 
 ## Exercice 4 — Entraînement long sur ImageNet complet via `sbatch`
 
-
+### 1. Profilage temporel et matériel
 Il s'est terminé avec l'état **`TIMEOUT`** après **4 h 00 min 22 s**, car il a atteint la limite de temps demandée. Cependant, **9 époques complètes** ont été réalisées, ce qui est suffisant pour l'analyse demandée dans le TP.
 
-### 1. Profilage temporel et matériel
 
-| Élément | Valeur |
-|---|---|
-| Job Slurm | `9086` |
-| État final | `TIMEOUT` |
-| Durée totale du job | 4 h 00 min 22 s |
-| Partition / QOS | `gpu` / `normal` |
-| Nœud | `starfighter-slurm-node-01-1` |
-| Ressources | 1 GPU, 8 CPU, 24 Go de RAM |
-| Taille du batch | 256 |
-| Nombre d'époques complètes | 9 |
-| Modèle exact du GPU | À relever avec `nvidia-smi` dans les logs |
-| Durée exacte d'une époque | À relever dans les logs |
+
 
 
 
@@ -296,84 +285,21 @@ La perte de validation est ici inférieure à celle de l'entraînement.
 
 #### Pourquoi le sur-apprentissage est-il plus faible sur ImageNet complet ?
 
-Sur le sous-ensemble de 20 000 images, le modèle dispose d'un nombre limité d'exemples et peut plus facilement mémoriser certaines caractéristiques propres aux images d'entraînement.
+Avec seulement 20 000 images, le modèle risque davantage d'apprendre les exemples par cœur.
 
-Sur ImageNet complet, le réseau apprend à partir d'environ **1,28 million d'images**, ce qui apporte une diversité beaucoup plus importante d'objets, de textures, de positions et d'arrière-plans.
+Sur ImageNet complet, il dispose d'environ **1,28 million d'images**. Cette plus grande diversité l'aide à mieux reconnaître les caractéristiques générales des objets.
 
-Cette diversité favorise l'apprentissage de caractéristiques générales plutôt que la mémorisation d'exemples particuliers.
+La **Data Augmentation** et le **Dropout** permettent aussi de limiter le sur-apprentissage en rendant l'entraînement plus varié.
 
-De plus, la **Data Augmentation** et le **Dropout** agissent comme des mécanismes de régularisation :
+Cependant, il faut rester prudent : les pertes d'entraînement et de validation ne sont pas calculées exactement dans les mêmes conditions.
 
-- `RandomResizedCrop(227)` produit des cadrages aléatoires.
-- `RandomHorizontalFlip()` applique des retournements horizontaux aléatoires.
-- `Dropout(p=0.5)` désactive aléatoirement certaines activations du classifieur pendant l'entraînement.
-
-Ces mécanismes contribuent à limiter le sur-apprentissage.
-
-Toutefois, l'écart négatif observé sur ImageNet complet ne signifie pas, à lui seul, que le modèle généralise mieux : les pertes d'entraînement et de validation sont calculées dans des conditions différentes. Les deux expériences ont également des nombres de mises à jour très différents.
-
-**Conclusion :** sur les neuf époques observées, l'entraînement sur ImageNet complet ne présente pas de signe de sur-apprentissage. Le grand nombre d'images et les mécanismes de régularisation favorisent la généralisation.
-
+**Conclusion :** après 9 époques, on ne voit pas de signe de sur-apprentissage sur ImageNet complet. Le grand nombre d'images et les techniques de régularisation aident le modèle à mieux généraliser.
 ### 4. Pourquoi `Loss/Validation` est-elle inférieure à `Loss/Train` ?
 
-Ce phénomène peut être expliqué par deux différences techniques entre les phases d'entraînement et de validation.
+Cela s'explique principalement par deux raisons :
 
-#### Première raison : la Data Augmentation
+- **La Data Augmentation :** pendant l'entraînement, les images sont modifiées aléatoirement, ce qui les rend parfois plus difficiles à reconnaître. En validation, les images ne subissent pas ces transformations aléatoires.
 
-Pendant l'entraînement, les images subissent des transformations aléatoires :
+- **Le Dropout :** il est activé pendant l'entraînement pour éviter le sur-apprentissage, mais désactivé pendant la validation. Le modèle peut donc obtenir de meilleurs résultats en validation.
 
-```python
-transforms.RandomResizedCrop(227)
-transforms.RandomHorizontalFlip()
-```
-
-Ces transformations rendent les exemples plus variés et parfois plus difficiles à classifier.
-
-Pendant la validation, les transformations sont déterministes :
-
-```python
-transforms.Resize(256)
-transforms.CenterCrop(227)
-```
-
-Les images de validation peuvent donc être plus faciles à classifier que les images augmentées utilisées pendant l'entraînement.
-
-#### Deuxième raison : le Dropout
-
-Pendant l'entraînement, l'appel à :
-
-```python
-model.train()
-```
-
-active les couches `nn.Dropout(p=0.5)` d'AlexNet.
-
-Le Dropout désactive aléatoirement certaines activations, ce qui rend l'apprentissage plus difficile mais contribue à éviter le sur-apprentissage.
-
-Pendant la validation, l'appel à :
-
-```python
-model.eval()
-```
-
-désactive le Dropout. Le réseau utilise alors toutes ses activations, ce qui peut réduire la perte.
-
-Ainsi, il est possible d'observer :
-
-$$
-\mathrm{Loss/Validation} < \mathrm{Loss/Train}
-$$
-
-Ce résultat n'indique pas nécessairement une erreur de programmation. Il s'explique notamment par les différences de prétraitement et de fonctionnement du réseau entre l'entraînement et la validation.
-
-### Conclusion de l'exercice 4
-
-L'entraînement d'AlexNet sur ImageNet complet a permis de terminer **9 époques** avant l'arrêt automatique du job Slurm après quatre heures.
-
-À la dernière époque, le modèle atteint **30,10 % d'accuracy d'entraînement** et **37,41 % d'accuracy de validation**.
-
-Les courbes TensorBoard montrent une diminution continue des pertes et une augmentation régulière des accuracies.
-
-Contrairement à un sur-apprentissage marqué, aucune dégradation de la validation n'est observée. La diversité des données, la Data Augmentation et le Dropout contribuent à expliquer ce comportement.
-
-L'expérience illustre également l'intérêt de Slurm pour exécuter des entraînements longs sur GPU et de TensorBoard pour suivre leur progression.
+C'est pourquoi la **loss de validation peut être plus faible que celle d'entraînement**. Ce n'est pas forcément une erreur, mais une conséquence des différences entre les deux phases.
